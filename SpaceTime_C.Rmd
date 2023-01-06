@@ -1,0 +1,458 @@
+---
+title: "Spacetime_c"
+output:
+  word_document: default
+  html_document: default
+date: "2022-08-24"
+---
+
+```{r}
+library(tidyverse)
+library(viridis)
+library(geoR)
+library(lubridate)
+library(forecast)
+library(dlm)
+library(gridExtra)
+library(magrittr)
+
+```
+
+```{r}
+metadata <- read.csv("C:/Users/NSK/Documents/Files/metadata.csv")
+
+maxTemp <- read.csv("C:/Users/NSK/Documents/Files/MaxTemp.csv")
+```
+
+```{r}
+Maxtemp_loc_df<-maxTemp %>% gather(key = Location, value = MaxTemp, -Date)
+
+merge_df <- merge(Maxtemp_loc_df, metadata, by = "Location") %>% mutate(ID = row_number())
+
+summary(merge_df)
+
+```
+
+```{r}
+#Creating geodata for whole data
+set.seed(123)
+geo_con<- as.geodata(merge_df, coords.col = 4:5, data.col = 3)
+geo_df <- jitterDupCoords(geo_con, max = 0.1, min = 0.05)
+summary(geo_df)
+
+boxplot(merge_df$MaxTemp)
+hist(merge_df$MaxTemp, xlab = "Maximum Temperature across Location", main = "Histogram for MaxTemp")
+plot(geo_df)
+points.geodata(geo_df)
+
+```
+
+```{r}
+#MAX Temperature Trend
+ggplot(data = merge_df, mapping = aes(x = ymd(Date), y = Location,
+fill = MaxTemp)) + geom_tile() + scale_fill_viridis(name = "In Celisus",option = "plasma", begin = 0, end = 1, direction = 1) + theme_minimal() +
+  labs(title = "Maxmimum temperature trend", x = "Date",y = "Location") + theme(legend.position = "bottom") +
+  theme(legend.title = element_text(size = 12)) + 
+  theme(axis.text.y = element_text(size = 10)) +
+  theme(axis.text.x = element_text(size = 10)) + 
+  theme(axis.title = element_text(size = 12,face = "plain"))+
+  theme(legend.key.width=unit(1,"cm"),legend.key.height = unit(1, "centimeter"))
+
+#graph for Elevation of each location 
+ggplot(data = metadata, aes(x = Location, y = Elevation)) + geom_col() +
+labs(title = "Elevation of each location", y = "Elevation in meters") +
+theme(axis.text.x = element_text(angle = 90, vjust = 0.5,hjust = 1))
+```
+
+```{r}
+#Creating GEO data for three Location
+df_3cites <- merge_df %>% filter(Location == c("Morecambe", "Coventry", "Kinross"))
+geo3con <- as.geodata(df_3cites, coords.col = 4:5, data.col = 3)
+geo3df <- jitterDupCoords(geo3con, max = 0.1, min = 0.05)
+plot(geo3df)
+
+#Box plot
+boxplot(df_3cites$MaxTemp)
+
+#Histogram
+hist(df_3cites$MaxTemp, xlab = "Maximum Temperature across three Location", main = "Histogram for MaxTemp")
+
+#plot for geoData
+plot(geo3df)
+points.geodata(geo3df)
+
+```
+
+```{r}
+#filtering the data by  on required Location
+df_Coventry<- merge_df %>% filter(Location == "Coventry") 
+df_Kinross<- merge_df %>% filter(Location == "Kinross") 
+df_Morecambe <- merge_df %>% filter(Location == "Morecambe")
+
+```
+
+```{r}
+
+#Creating geodata for Morecambe
+geoMorecambe <- as.geodata(df_Morecambe, coords.col = 4:5, data.col = 3)
+geoMorecambe_df <- jitterDupCoords(geoMorecambe, max = 0.1, min = 0.05)
+summary(geoMorecambe_df)
+boxplot(df_Morecambe$MaxTemp, main="Morecambe")
+hist(df_Morecambe$MaxTemp, xlab = "Maximum Temperature across Morecambe")
+plot(geoMorecambe_df)
+
+```
+
+```{r}
+
+#Creating geodata for Coventry
+geoCoventry <- as.geodata(df_Coventry, coords.col = 4:5, data.col = 3)
+geoCoventry_df <- jitterDupCoords(geoCoventry, max = 0.1, min = 0.05)
+summary(geoCoventry_df)
+boxplot(df_Coventry$MaxTemp, main="Coventry")
+hist(df_Coventry$MaxTemp, xlab = "Maximum Temperature across Coventry")
+plot(geoCoventry_df)
+
+
+```
+
+```{r}
+#Creating data for Kinross
+geoKinross <- as.geodata(df_Kinross, coords.col = 4:5, data.col = 3)
+geoKinross_df <- jitterDupCoords(geoKinross, max = 0.1, min = 0.05)
+summary(geoKinross_df)
+boxplot(df_Kinross$MaxTemp, main="Kinross")
+hist(df_Kinross$MaxTemp, xlab = "Maximum Temperature across Kinross")
+plot(geoKinross_df)
+
+```
+
+## SPATIAL MODELING
+
+```{r}
+#Removing Three given Location data's to predict
+Data_20200912 <- merge_df %>% filter(Date=="20200912")
+Data_20200912 <- Data_20200912[-c(2,7)]
+spatial_data<-Data_20200912[!(Data_20200912$Location=="Morecambe" | Data_20200912$Location=="Coventry" | Data_20200912$Location=="Kinross" ),]
+non_spatialdata <- Data_20200912 %>% filter(Location == "Morecambe" | Location == "Coventry" | Location == "Kinross")
+
+set.seed(123)
+
+#Converting the full data into geo data
+geo_date <- as.geodata(Data_20200912,coords.col=2:3,data.col=5)
+dup2 <- dup.coords(geo_date)
+geo_date_jitter <- jitterDupCoords(geo_date,max=0.1,min=0.05) 
+plot(geo_date_jitter)
+
+#Converting the spatial data into geo data
+spatial_geo <- as.geodata(spatial_data,coords.col=2:3,data.col=5)
+dup1 <- dup.coords(spatial_geo)
+spatial_geo_jitter <- jitterDupCoords(spatial_geo,max=0.1,min=0.05)
+plot(spatial_geo_jitter)
+
+
+#Checking isotrophy
+isotrophy_temp <- variog4(spatial_geo_jitter)
+isotrophy_1st <- variog4(spatial_geo_jitter, trend = "1st")
+isotrophy_2nd <- variog4(spatial_geo_jitter, trend = "2nd")
+# Plot isotrophy
+par(mfrow = c(3, 1))
+plot(isotrophy_temp, omnidirectional = TRUE)
+plot(isotrophy_1st, omnidirectional = TRUE)
+plot(isotrophy_2nd, omnidirectional = TRUE)
+
+
+#likfit Exponential models
+exp_model1 <- likfit(spatial_geo_jitter, ini=c(0.5, 0.5), fix.nug = TRUE, cov.model='exponential', kappa=1.5)
+exp_model2 <- likfit(spatial_geo_jitter, ini=c(0.5, 0.5), fix.nug = TRUE, cov.model='exponential',trend="1st", kappa=1.5)
+
+#Xvalidating spatial model
+xv.ml <- xvalid(spatial_geo_jitter, model = exp_model2)
+par(mfcol = c(5,2), mar = c(4,4,1,1))
+plot(xv.ml)
+#Matern
+matern1 <- likfit(spatial_geo_jitter, ini=c(0.5, 0.5), fix.nug = TRUE, cov.model='matern', kappa=1.5)
+matern2 <- likfit(spatial_geo_jitter, ini=c(0.5, 0.5), fix.nug = TRUE, cov.model='matern',trend="1st")
+
+```
+
+```{r}
+#XValidating the matern2 model with trend
+xv.ml <- xvalid(spatial_geo_jitter, model = matern2)
+par(mfcol = c(5,2), mar = c(4,4,1,1))
+plot(xv.ml)
+
+#likfit Powered exponential models
+pow_exp1 <- likfit(spatial_geo_jitter, ini=c(0.5, 0.5), fix.nug = TRUE, cov.model='powered.exponential', kappa=1.5)
+pow_exp2 <- likfit(spatial_geo_jitter, ini=c(0.5, 0.5), fix.nug = TRUE, cov.model='powered.exponential',trend="1st", kappa=1.5)
+
+#Prediction using matern
+pred.grid<-expand.grid(seq(min(spatial_geo_jitter$coords[,1]),max(spatial_geo_jitter$coords[,1]),by=0.1),seq(min(spatial_geo_jitter$coords[,2]),max(spatial_geo_jitter$coords[,2]),by=0.1))
+
+kc <- krige.conv(spatial_geo_jitter, loc = pred.grid, krige = krige.control(obj.model = matern2))
+par(mfrow=c(1,1))
+
+image(kc, col = viridis::viridis(100), zlim = c(0,max(c(kc$predict))),coords.data =geo_date_jitter[1]$coords,main = 'Mean- TemperatureL',xlab='x',ylab='y',x.leg = c(1,3),y.leg = c(50,51))
+
+image(kc, col = viridis::viridis(100),values = kc$krige.var, zlim = c(0,max(c(kc$krige.var))), coords.data=geo_date_jitter[1]$coords ,main = 'Variance',xlab='x',ylab='y',x.leg = c(1,3),y.leg = c(50,51))
+
+```
+
+## Predicting temperature during winter:
+
+```{r}
+#Comparing  temperature prediction during winter:
+
+data_20201218<-merge_df %>% filter(Date == "20201218")
+
+data_20201218 <- data_20201218[-c(2,7)]
+spatial_data_win<-data_20201218[!(data_20201218$Location=="Morecambe" | data_20201218$Location=="Coventry" | data_20201218$Location=="Kinross" ),]
+
+non_spatialdata_win <- data_20201218 %>% filter(Location == "Morecambe" | Location == "Coventry" | Location == "Kinross")
+
+set.seed(123)
+#Converting the spatial data into geo data
+geodata_win <- as.geodata(spatial_data_win,coords.col=2:3,data.col=5)
+dup <- dup.coords(geodata_win)
+geodata_win2 <- jitterDupCoords(geodata_win,max=0.1,min=0.05) 
+plot(geodata_win2)
+
+#Converting the full data into geo data
+geodata_win_full <- as.geodata(data_20201218,coords.col=2:3,data.col=5)
+dup <- dup.coords(geodata_win_full)
+geodata_win_full1 <- jitterDupCoords(geodata_win_full,max=0.1,min=0.05) 
+plot(geodata_win_full1)
+
+#converting three location data into geodata:
+ geodata_win_non<- as.geodata(non_spatialdata_win,coords.col=2:3,data.col=5)
+dup <- dup.coords(geodata_win_non)
+geodata_win_non1 <- jitterDupCoords(geodata_win_non,max=0.1,min=0.05) 
+plot(geodata_win_non1)
+
+
+pred.grid<-expand.grid(seq(min(geodata_win2$coords[,1]),max(geodata_win2$coords[,1]),by=0.1),seq(min(geodata_win2$coords[,2]),max(geodata_win2$coords[,2]),by=0.1))
+
+kc <- krige.conv(geodata_win2, loc = pred.grid, krige = krige.control(obj.model = matern2))
+
+image(kc, col = viridis::viridis(100), zlim = c(0,max(c(kc$predict))),coords.data =geodata_win_non1[1]$coords,main = 'Mean-Winter',xlab='x',ylab='y',x.leg = c(2,4),y.leg = c(50,51))
+
+image(kc, col = viridis::viridis(100),values = kc$krige.var, zlim = c(0,max(c(kc$krige.var))), coords.data=geodata_win_non1[1]$coords ,main = 'Variance - ML',xlab='x',ylab='y',x.leg = c(2,4),y.leg =c(50,51))
+
+```
+
+## Question 2
+
+## Fit a time series model to predict the maximum temperature in Yeovilton on November 1st-7th 2020, and assess this model's appropriateness for other locations.
+
+```{r}
+library(dplyr)
+library(xts)
+# Derive Yeovilton dataset
+yeovilton_data <- merge_df %>% filter (Location == "Yeovilton") %>% dplyr::select (c (Date, MaxTemp))
+
+#Obtain subset of data subjected for analysis
+yeovilton_givendata <- filter (yeovilton_data, Date <= "20201031" & Date >= "20200101")
+Date_ymd<-ymd(yeovilton_givendata$Date)
+yeovilton_givendata$Date_ymd<-Date_ymd
+
+## Convert to time series
+yeovilton_df<-yeovilton_givendata %>% select (c (Date_ymd, MaxTemp))
+ts_yeovilton <- ts(yeovilton_df$MaxTemp,start=2020-01-01,frequency = 1)
+
+# Plot time series
+p<-ggplot (data = yeovilton_df, aes (x = Date_ymd, y = MaxTemp)) +
+geom_line(color="turquoise4")
+p + scale_x_date (date_breaks = "4 week") +
+theme (axis.text.x = element_text (angle = 90))
+
+#Trend removal
+diff1 <- ts (diff (ts_yeovilton, 1))
+par (mar=c (4,2,2,2))
+plot(diff1)
+#Seasonal removal
+seasonal_diff <- ts (diff (diff1, 1))
+par (mar=c (4,2,2,2))
+plot(seasonal_diff)
+#ACF and PACF
+par (mfrow=c (1,2))
+acf (seasonal_diff, na.action = na.pass, main = 'ACF')
+pacf (seasonal_diff, na.action = na.pass, main = 'PACF')
+
+#Auto Arima Modelling
+yeovilton_autoarima <- auto.arima (ts_yeovilton, max.p = 4, max.q = 4, max.d = 4, seasonal = FALSE)
+yeovilton_autoarima
+par (mar = c (4, 4, 4, 4))
+tsdiag(yeovilton_autoarima)
+pred_aa <- forecast (yeovilton_autoarima, h = 7)
+pred_aa
+
+#Arima Modelling
+yeovilton_model1<-arima(ts_yeovilton, order = c(1,1,0))
+yeovilton_model2<-arima(ts_yeovilton, order = c(1,1,1))
+yeovilton_model3<-arima(ts_yeovilton, order = c(1,1,2))
+yeovilton_model4<-arima(ts_yeovilton, order = c(1,1,3))
+yeovilton_model5<-arima(ts_yeovilton, order = c(1,1,4))
+yeovilton_model6<-arima(ts_yeovilton, order = c(2,1,0))
+yeovilton_model7<-arima(ts_yeovilton, order = c(2,1,1))
+yeovilton_model8<-arima(ts_yeovilton, order = c(2,1,2))
+yeovilton_model9<-arima(ts_yeovilton, order = c(2,1,3))
+
+yeovilton_model9
+yeovilton_model8
+yeovilton_model7
+yeovilton_model6
+yeovilton_model5
+yeovilton_model4
+yeovilton_model3
+yeovilton_model2
+yeovilton_model1
+
+#Residual check for model 3
+tsdiag(yeovilton_model3)
+
+#Model 2 and 3 have less AIC and have large log log likehood. So we are selecting it compare to other model. From this two we are selecting third Model
+#Predicting the values
+yeovilton_pred <- forecast(yeovilton_model3, h = 7)
+yeovilton_pred
+
+sample_df <- data.frame (matrix (ncol = 5, nrow = 312))
+colnames(sample_df) <-c('Date','Expected','Predicted','Lower_CI','Upper_CI')
+sample_df$Date<- seq.Date (as.Date ('2020-01-01'), as.Date ('2020-11-07'), by = 'day')
+sample_df$Expected [1:312] <- yeovilton_df$MaxTemp
+sample_df$Predicted [306:312] <-yeovilton_pred$mean
+sample_df$Lower_CI [306:312] <-yeovilton_pred$lower [, 2]
+sample_df$Upper_CI [306:312] <-yeovilton_pred$upper [, 2]
+
+
+ggplot (data = sample_df, aes (x = Date)) +
+geom_line (aes (y = Expected, colour = "Expected")) +
+geom_line (aes (y = Predicted, colour = "Predicted")) +
+geom_line (aes (y = Lower_CI, colour = "90% interval"), lty = 2) +
+geom_line (aes (y = Upper_CI, colour = "90% interval"), lty = 2) +
+scale_x_date (limits = as.Date (c ("2020-10-01", "2020-11-07"))) +
+scale_color_manual (name = "Colour",breaks = c ("Expected","Predicted", "90% interval"),
+values = c (Expected = 'blue', Predicted = "red", `90% interval` = "orange")) +
+labs (x = 'Date', y = "Maximum temperature", title = "Maximum temperature in yeovilton")
+
+```
+
+## Question 3
+
+## Modeling for other Location
+
+## Modeling for Morecambe
+
+```{r}
+other_Morecambe <-filter (merge_df, Location=="Morecambe")
+other_Morecambe_date<-filter (other_Morecambe, Date <= "20201031" & Date >= "20200101")
+# Convert to time series
+other_Morecambe_ts<- as.ts(other_Morecambe_date$MaxTemp, start=2020-01-01,frequency = 1)
+other_Morecambe_date$Date_ymd<-ymd(other_Morecambe_date$Date)
+
+# Plot time series
+p<-ggplot (data = other_Morecambe_date, aes (x = Date_ymd, y = MaxTemp)) +
+geom_line(color="red")
+p + scale_x_date (date_breaks = "4 week") +
+theme (axis.text.x = element_text (angle = 90))
+
+# Auto arima fit model
+other_Morecambe_autoarima <- auto.arima(other_Morecambe_ts, max.p = 4, max.q = 4, max.d = 4, seasonal = FALSE)
+other_Morecambe_autoarima
+tsdiag(other_Morecambe_autoarima)
+
+# Fitting best ARIMA model
+other_Morecambe_arima <- arima (other_Morecambe_ts, order = c (1,1,2))
+other_Morecambe_arima
+tsdiag(other_Morecambe_arima)
+
+#Predicting the values
+other_mom_pred <- forecast (other_Morecambe_arima, h = 7)
+other_mom_pred
+
+sample_df <- data.frame (matrix (ncol = 5, nrow = 312))
+colnames(sample_df) <-c('Date','Expected','Predicted','Lower_CI','Upper_CI')
+sample_df$Date<- seq.Date (as.Date ('2020-01-01'), as.Date ('2020-11-07'), by = 'day')
+sample_df$Expected [1:312] <- other_Morecambe_date$MaxTemp
+sample_df$Predicted [306:312] <-other_mom_pred$mean
+sample_df$Lower_CI [306:312] <-other_mom_pred$lower [, 2]
+sample_df$Upper_CI [306:312] <-other_mom_pred$upper [, 2]
+
+
+ggplot (data = sample_df, aes (x = Date)) +
+geom_line (aes (y = Expected, colour = "Expected")) +
+geom_line (aes (y = Predicted, colour = "Predicted")) +
+geom_line (aes (y = Lower_CI, colour = "90% interval"), lty = 2) +
+geom_line (aes (y = Upper_CI, colour = "90% interval"), lty = 2) +
+scale_x_date (limits = as.Date (c ("2020-10-01", "2020-11-07"))) +
+scale_color_manual (name = "Colour",breaks = c ("Expected","Predicted", "90% interval"),
+values = c (Expected = 'blue', Predicted = "red", `90% interval` = "orange")) +
+labs (x = 'Date', y = "Maximum temperature", title = "Maximum temperature in Morecambe")
+
+```
+
+## Modeling for Morecambe Januray
+
+```{r}
+
+##Predicting the Temperature value for Jan 2021 in Morecambe:
+
+other_Morecambe <-filter (merge_df, Location=="Morecambe")
+other_Morecambe_jan<-other_Morecambe %>% select (c (Date, MaxTemp))
+other_Morecambe_2020<-ts(other_Morecambe_jan$MaxTemp,start=2020-01-01,frequency = 1)
+other_Morecambe_2020_arima<-arima(other_Morecambe_2020, order = c(1,1,2))
+other_Morecambe_2020_arima#Significant
+
+tsdiag(other_Morecambe_2020_arima)
+pred_mom <- predict(other_Morecambe_2020_arima,n.ahead = 7)
+pred_mom$se
+
+prediction_mom<-pred_mom$pred
+upp1_ci<-0
+low1_ci<-0
+for(i in 1:7){
+ upp1_ci[i]<-prediction_mom[i]+2*pred_mom$se[i]
+ low1_ci[i]<-prediction_mom[i]-2*pred_mom$se[i]
+}
+par(mfrow=c(1,1))
+ts.plot(other_Morecambe_2020,pred_mom$pred,lty = c(1,3), col = c('blue','red'),xlab = "Time",ylab = "Maximum Temperature",
+ main = "Temperature Prediction in Morecambe- Jan 2021")
+
+```
+
+## Predicting the temperature in summer
+
+```{r}
+#Predicting the temperature in summer
+other_Morecambe <-filter (merge_df, Location=="Morecambe")
+other_Morecambe_sum<-other_Morecambe[1:213,c(2,3)]
+other_Morecambe_sum_ts<-ts(other_Morecambe_sum$MaxTemp,start=2020-01-01,frequency = 1)
+Morecambe_sum_arima<-arima(other_Morecambe_sum_ts, order = c(1,1,2))
+Morecambe_sum_arima#Significant
+
+tsdiag(Morecambe_sum_arima)
+
+sum_mom_pred <- forecast (Morecambe_sum_arima, h = 7)
+sum_mom_pred
+
+
+
+sample_df <- data.frame (matrix (ncol = 8, nrow = 220))
+colnames(sample_df) <-c('Date','Expected','Predicted','Lower_CI','Upper_CI')
+sample_df$Date<- seq.Date (as.Date ('2020-01-01'), as.Date ('2020-08-07'), by = 'day')
+sample_df$Expected [1:220] <- other_Morecambe_sum$MaxTemp
+sample_df$Predicted [214:220] <-sum_mom_pred$mean
+sample_df$Lower_CI [214:220] <-sum_mom_pred$lower [, 2]
+sample_df$Upper_CI [214:220] <-sum_mom_pred$upper [, 2]
+
+
+ggplot (data = sample_df, aes (x = Date)) +
+geom_line (aes (y = Expected, colour = "Expected")) +
+geom_line (aes (y = Predicted, colour = "Predicted")) +
+geom_line (aes (y = Lower_CI, colour = "90% interval"), lty = 2) +
+geom_line (aes (y = Upper_CI, colour = "90% interval"), lty = 2) +
+scale_x_date (limits = as.Date (c ("2020-01-01", "2020-08-07"))) +
+scale_color_manual (name = "Colour",breaks = c ("Expected","Predicted", "90% interval"),
+values = c (Expected = 'blue', Predicted = "red", `90% interval` = "orange")) +
+labs (x = 'Date', y = "Maximum temperature", title = "Maximum temperature in Morecambe")
+
+```
